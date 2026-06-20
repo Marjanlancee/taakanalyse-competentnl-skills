@@ -1,100 +1,105 @@
-// api/analyse-competentnl.js — Functieprofiel Decompositor CompetentNL
-// CompetentNL API (https://api.competentnl.nl) + Claude voor taken- en skillsanalyse
+// api/analyse-competentnl.js — Functieprofiel Decompositor CompetentNL v2
+// Strategie: zoek beroep via occupations API → haal skills op per beroep URI
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 const CNL_BASE = 'https://api.competentnl.nl';
 
 // ─── N-Triples parser ─────────────────────────────────────────────────────────
-// Elke regel: <subject> <predicate> <object> .
-// Object kan zijn: <uri> of "literal"@lang of "literal"
 
 function parseNTriples(text) {
   const triples = [];
   const lines = text.split('\n').filter(l => l.trim() && !l.startsWith('#'));
   for (const line of lines) {
-    // Match: subject predicate object .
-    const m = line.match(/^(<[^>]+>)\s+(<[^>]+>)\s+(.*)\s+\.\s*$/);
+    const m = line.match(/^(<[^>]+>|_:\w+)\s+(<[^>]+>)\s+(.*)\s+\.\s*$/);
     if (!m) continue;
-    const subject = m[1].slice(1, -1); // strip < >
+    const subject = m[1].startsWith('<') ? m[1].slice(1, -1) : m[1];
     const predicate = m[2].slice(1, -1);
     let object = m[3].trim();
-    // Strip URI brackets
     if (object.startsWith('<') && object.endsWith('>')) {
       object = object.slice(1, -1);
-    }
-    // Strip literal quotes and lang tag
-    else if (object.startsWith('"')) {
-      object = object.replace(/^"(.*)"(@\w+)?(\^\^<[^>]+>)?$/, '$1');
+    } else if (object.startsWith('"')) {
+      object = object.replace(/^"(.*)"(@\w+(-\w+)*)?(\^\^<[^>]+>)?$/, '$1');
     }
     triples.push({ subject, predicate, object });
   }
   return triples;
 }
 
-// Zet n-triples om naar skills-objecten
-function tripleToSkills(text) {
-  const triples = parseNTriples(text);
-
-  // Groepeer per subject
-  const bySubject = {};
+function groupBySubject(triples) {
+  const map = {};
   for (const t of triples) {
-    if (!bySubject[t.subject]) bySubject[t.subject] = {};
+    if (!map[t.subject]) map[t.subject] = {};
     const key = t.predicate.split('#').pop().split('/').pop();
-    if (!bySubject[t.subject][key]) bySubject[t.subject][key] = [];
-    bySubject[t.subject][key].push(t.object);
+    if (!map[t.subject][key]) map[t.subject][key] = [];
+    map[t.subject][key].push(t.object);
   }
-
-  const skills = [];
-  for (const [uri, props] of Object.entries(bySubject)) {
-    // Alleen HumanCapability (L3 vaardigheden) en ESCO skills
-    const types = props['type'] || [];
-    const isHumanCap = types.some(t => t.includes('HumanCapability'));
-    const isESCO = uri.includes('data.europa.eu/esco/skill');
-
-    // Voorkeurslabel NL
-    const labels = props['prefLabel'] || [];
-    const label = labels[0] || null;
-    if (!label) continue;
-
-    // Notatie (CompetentNL code)
-    const notation = (props['notation'] || [])[0] || null;
-
-    // ESCO match
-    const escoMatches = props['closeMatchESCO'] || props['exactMatch'] || [];
-    const escoUri = escoMatches.find(u => u.includes('data.europa.eu/esco')) || null;
-
-    // Type bepalen
-    let type = 'vaardigheid';
-    if (isESCO) type = 'esco';
-    else if (isHumanCap) type = 'humancapability';
-
-    skills.push({
-      uri,
-      label,
-      notation,
-      type,
-      esco_uri: escoUri,
-      cnl_matched: true,
-    });
-  }
-
-  return skills;
+  return map;
 }
 
-// ─── CompetentNL API aanroepen ───────────────────────────────────────────────
+// ─── CompetentNL API helpers ──────────────────────────────────────────────────
 
-async function zoekCNLSkills(searchTerm, apiKey) {
-  const url = `${CNL_BASE}/skills-label-08/v1?searchTerm=${encodeURIComponent(searchTerm)}&page=1&pageSize=100`;
+async function cnlGet(endpoint, cnlKey) {
+  const url = `${CNL_BASE}${endpoint}`;
   const res = await fetch(url, {
-    headers: {
-      'apikey': apiKey,
-      'accept': 'application/n-triples',
-    },
+    headers: { 'apikey': cnlKey, 'accept': 'application/n-triples' }
   });
-  if (!res.ok) throw new Error(`CompetentNL API fout: ${res.status}`);
+  if (!res.ok) throw new Error(`CNL API fout ${res.status}: ${endpoint}`);
   const text = await res.text();
-  if (!text || text.trim().length < 10) return [];
-  return tripleToSkills(text);
+  if (!text || text.trim().length < 10) return {};
+  return groupBySubject(parseNTriples(text));
+}
+
+// Zoek beroepen op label → geeft lijst van {uri, label, definitie}
+async function zoekBeroepen(searchTerm, cnlKey) {
+  const data = await cnlGet(`/occupations-label-01/v1?searchTerm=${encodeURIComponent(searchTerm)}&page=1&pageSize=20`, cnlKey);
+  const beroepen = [];
+  for (const [uri, props] of Object.entries(data)) {
+    if (!uri.includes('occupation')) continue;
+    const label = (props['prefLabel'] || [])[0];
+    const definitie = (props['definition'] || [])[0] || '';
+    if (label) beroepen.push({ uri, label, definitie });
+  }
+  return beroepen;
+}
+
+// Haal skills op bij een beroep URI via occupations-id endpoint
+async function haalSkillsBijBeroep(beroepUri, cnlKey) {
+  // Extraheer het ID uit de URI
+  const id = beroepUri.split('/').pop();
+  const data = await cnlGet(`/occupations-id-01/v1?occupationId=${encodeURIComponent(id)}&page=1&pageSize=200`, cnlKey);
+
+  const hardskills = [];
+  const softskills = [];
+
+  for (const [uri, props] of Object.entries(data)) {
+    const label = (props['prefLabel'] || [])[0];
+    const notation = (props['notation'] || [])[0] || null;
+    const types = props['type'] || [];
+    const escoUri = (props['closeMatchESCO'] || props['exactMatch'] || []).find(u => u.includes('europa.eu')) || null;
+
+    if (!label) continue;
+
+    const isKennisgebied = types.some(t => t.includes('KnowledgeDomain')) || uri.includes('knowledge');
+    const isVaardigheid = types.some(t => t.includes('HumanCapability') && !t.includes('Knowledge')) || uri.includes('humancapability');
+    const isESCO = uri.includes('data.europa.eu/esco/skill');
+
+    const skill = { uri, label, notation, esco_uri: escoUri, cnl_matched: true };
+
+    if (isKennisgebied) {
+      hardskills.push({ ...skill, cnl_type: 'kennisgebied' });
+    } else if (isVaardigheid || isESCO) {
+      // Bepaal hard vs soft op basis van label/type
+      const softKeywords = ['communicer', 'samenwerk', 'overleg', 'leid', 'coach', 'motiveer', 'empathie', 'flexibel', 'aanpass', 'initiatief', 'proactief', 'stress', 'plannen', 'organiseer', 'priorit', 'besliss'];
+      const isSoft = softKeywords.some(k => label.toLowerCase().includes(k));
+      if (isSoft) {
+        softskills.push({ ...skill, cnl_type: 'softskill' });
+      } else {
+        hardskills.push({ ...skill, cnl_type: 'vaardigheid' });
+      }
+    }
+  }
+
+  return { hardskills, softskills };
 }
 
 // ─── Claude helpers ───────────────────────────────────────────────────────────
@@ -164,60 +169,73 @@ ${eigenTaal ? `BEDRIJFSEIGEN TERMEN: ${eigenTaal}` : ''}
 JSON (direct, geen markdown):
 {"functietitel":"string","samenvatting":"max 2 zinnen","vergelijkbare_titels":["string"],"taken":[{"id":"T01","taak":"concrete taakomschrijving","bron":"profiel|beroep|bedrijf","frequentie":"dagelijks|wekelijks|maandelijks","belang":"hoog|middel|laag","geselecteerd":true}]}
 
-Genereer 15-30 taken afhankelijk van de complexiteit van de functie. Wees volledig en concreet.`,
+Genereer 15-30 taken. Wees volledig en concreet.`,
     apiKey
   );
 }
 
-// ─── Stap 2: Skills koppelen via CompetentNL ─────────────────────────────────
+// ─── Stap 2: Skills koppelen via CompetentNL occupations ─────────────────────
 
 async function koppelSkills(functietitel, taken, functieprofiel, bedrijf, eigenTaal, anthropicKey, cnlKey) {
 
-  // Verzamel zoektermen: functietitel + kernwoorden uit taken
-  const zoektermen = new Set();
-  zoektermen.add(functietitel);
+  // Stap A: zoek het dichtstbijzijnde beroep in CompetentNL
+  let alleHardskills = [];
+  let alleSoftskills = [];
 
-  // Extraheer kernwoorden uit taken via Claude
-  const kernwoorden = await vraagClaude(
-    `Je bent expert in Nederlandse arbeidsmarktterminologie. Geef ALLEEN geldige JSON terug.`,
-    `Extraheer de belangrijkste Nederlandse vaardigheidstermen uit deze functietitel en taken.
-Geef maximaal 15 zoektermen terug die aansluiten bij de CompetentNL/ESCO-taxonomie.
-Gebruik enkelvoud, losse woorden of korte woordgroepen.
+  try {
+    // Zoek op functietitel
+    const beroepen = await zoekBeroepen(functietitel, cnlKey);
+    console.log(`Gevonden beroepen: ${beroepen.length}`);
 
-FUNCTIETITEL: ${functietitel}
-TAKEN: ${taken.map(t => t.taak).join('; ')}
+    if (beroepen.length > 0) {
+      // Laat Claude het beste beroep kiezen
+      let gekozenBeroep = beroepen[0];
+      if (beroepen.length > 1) {
+        const keuze = await vraagClaude(
+          `Je bent expert in beroepsclassificatie. Geef ALLEEN geldige JSON terug.`,
+          `Kies het meest passende beroep voor de functie "${functietitel}".
+BEROEPEN:
+${beroepen.map((b, i) => `${i}: ${b.label} — ${b.definitie.slice(0, 100)}`).join('\n')}
+JSON: {"index": 0}`,
+          anthropicKey, 500
+        );
+        const idx = Math.min(keuze.index || 0, beroepen.length - 1);
+        gekozenBeroep = beroepen[idx];
+      }
 
-JSON: {"termen": ["term1", "term2", ...]}`,
-    anthropicKey,
-    2000
-  );
+      console.log(`Gekozen beroep: ${gekozenBeroep.label} (${gekozenBeroep.uri})`);
 
-  (kernwoorden.termen || []).forEach(t => zoektermen.add(t));
-
-  // Zoek skills per term (sequentieel om rate limiting te voorkomen)
-  const alleSkills = new Map();
-  for (const term of zoektermen) {
-    try {
-      const gevonden = await zoekCNLSkills(term, cnlKey);
-      gevonden.forEach(s => {
-        if (!alleSkills.has(s.uri)) alleSkills.set(s.uri, s);
-      });
-      // Kleine pauze tussen requests
-      await new Promise(r => setTimeout(r, 200));
-    } catch(e) {
-      console.log(`CNL zoek fout voor "${term}":`, e.message);
+      // Haal skills op bij dit beroep
+      const { hardskills, softskills } = await haalSkillsBijBeroep(gekozenBeroep.uri, cnlKey);
+      alleHardskills = hardskills;
+      alleSoftskills = softskills;
+      console.log(`Skills bij beroep: ${hardskills.length} hardskills, ${softskills.length} softskills`);
     }
+
+    // Als weinig resultaten: ook zoeken op kernwoorden uit functietitel
+    if (alleHardskills.length < 5) {
+      const woorden = functietitel.split(' ').filter(w => w.length > 4);
+      for (const woord of woorden.slice(0, 2)) {
+        try {
+          const extraBeroepen = await zoekBeroepen(woord, cnlKey);
+          if (extraBeroepen.length > 0) {
+            const { hardskills, softskills } = await haalSkillsBijBeroep(extraBeroepen[0].uri, cnlKey);
+            hardskills.forEach(s => { if (!alleHardskills.find(x => x.label === s.label)) alleHardskills.push(s); });
+            softskills.forEach(s => { if (!alleSoftskills.find(x => x.label === s.label)) alleSoftskills.push(s); });
+          }
+          await new Promise(r => setTimeout(r, 200));
+        } catch(e) { console.log('Extra zoek fout:', e.message); }
+      }
+    }
+  } catch(e) {
+    console.log('Beroepen zoek fout:', e.message);
   }
 
-  const skillsLijst = [...alleSkills.values()];
-  console.log(`CompetentNL gevonden: ${skillsLijst.length} unieke skills`);
-
-  // Bouw keuzelijst voor Claude
-  const skillsTekst = skillsLijst
-    .map(s => `${s.label}|${s.notation || s.uri.split('/').pop()}|${s.type}`)
-    .join('\n');
+  console.log(`Totaal: ${alleHardskills.length} hardskills, ${alleSoftskills.length} softskills`);
 
   const takenTekst = taken.map(t => `- ${t.id}: ${t.taak}`).join('\n');
+  const hardLijst = alleHardskills.map(s => `${s.label}|${s.notation || s.uri.split('/').pop()}`).join('\n');
+  const softLijst = alleSoftskills.map(s => `${s.label}|${s.notation || s.uri.split('/').pop()}`).join('\n');
 
   const eigenTermenLijst = eigenTaal
     ? eigenTaal.split(/[,\n]/).map(t => t.trim()).filter(Boolean)
@@ -225,32 +243,34 @@ JSON: {"termen": ["term1", "term2", ...]}`,
 
   const resultaat = await vraagClaude(
     `Je bent CompetentNL-expert en skills-analist. Geef ALLEEN geldige JSON terug, geen markdown.
-KRITIEKE REGEL: gebruik skills UITSLUITEND uit de meegestuurde CompetentNL-lijst.
+KRITIEKE REGEL: gebruik skills UITSLUITEND uit de meegestuurde CompetentNL-lijsten.
 Gebruik het exacte label en de exacte code. Verzin NOOIT zelf skills.
-MAX 3 vaardigheden en 2 competenties per taak.`,
+MAX 3 hardskills en 2 softskills per taak.`,
     `Koppel CompetentNL-skills aan taken voor: ${functietitel}
 
 TAKEN:
 ${takenTekst}
 ${bedrijf ? `BEDRIJF: ${bedrijf}` : ''}
-${eigenTaal ? `BEDRIJFSEIGEN TERMEN: ${eigenTaal}` : ''}
 
-BESCHIKBARE COMPETENTNL SKILLS (label|code|type):
-${skillsTekst || '(geen gevonden — gebruik dan alleen bedrijfseigen termen)'}
+BESCHIKBARE HARDSKILLS (label|code):
+${hardLijst || '(geen gevonden)'}
+
+BESCHIKBARE SOFTSKILLS (label|code):
+${softLijst || '(geen gevonden)'}
 
 JSON (direct, geen markdown):
 {
   "taken": [{
     "id": "T01",
-    "vaardigheden": [{
-      "skill": "exacte label uit de lijst",
+    "hardskills": [{
+      "skill": "exacte label uit de hardskills lijst",
       "cnl_code": "exacte code uit de lijst",
       "niveau": "Basis|Gevorderd|Expert",
       "bron": "profiel|beroep|bedrijf",
       "toelichting": "waarom relevant voor deze taak"
     }],
-    "competenties": [{
-      "competentie": "exacte label uit de lijst",
+    "softskills": [{
+      "softskill": "exacte label uit de softskills lijst",
       "cnl_code": "exacte code uit de lijst",
       "niveau": "Basis|Gevorderd|Expert",
       "bron": "profiel|beroep|bedrijf",
@@ -262,31 +282,44 @@ JSON (direct, geen markdown):
   );
 
   // Bouw lookup
-  const lookup = new Map(skillsLijst.map(s => [s.label, s]));
-  const lookupByCode = new Map(
-    skillsLijst
-      .filter(s => s.notation)
-      .map(s => [s.notation, s])
-  );
+  const hardLookup = new Map([
+    ...alleHardskills.map(s => [s.label, s]),
+    ...alleHardskills.filter(s => s.notation).map(s => [s.notation, s]),
+  ]);
+  const softLookup = new Map([
+    ...alleSoftskills.map(s => [s.label, s]),
+    ...alleSoftskills.filter(s => s.notation).map(s => [s.notation, s]),
+  ]);
 
-  const enrichSkill = (item, labelKey) => {
-    const label = item[labelKey];
-    const code = item.cnl_code;
-    const gevonden = lookup.get(label) || lookupByCode.get(code);
+  const enrichHard = (item) => {
+    const gevonden = hardLookup.get(item.skill) || hardLookup.get(item.cnl_code);
     return {
       ...item,
-      cnl_label: label,
-      cnl_code: gevonden?.notation || code || null,
+      cnl_label: item.skill,
+      cnl_code: gevonden?.notation || item.cnl_code || null,
       cnl_uri: gevonden?.uri || null,
       cnl_esco_uri: gevonden?.esco_uri || null,
-      cnl_type: gevonden?.type || null,
+      cnl_type: gevonden?.cnl_type || 'hardskill',
       cnl_matched: !!gevonden,
     };
   };
 
-  // Voeg bedrijfseigen termen toe als losse competenties
-  const eigenSkills = eigenTermenLijst.map(term => ({
-    competentie: term,
+  const enrichSoft = (item) => {
+    const gevonden = softLookup.get(item.softskill) || softLookup.get(item.cnl_code);
+    return {
+      ...item,
+      cnl_label: item.softskill,
+      cnl_code: gevonden?.notation || item.cnl_code || null,
+      cnl_uri: gevonden?.uri || null,
+      cnl_esco_uri: gevonden?.esco_uri || null,
+      cnl_type: gevonden?.cnl_type || 'softskill',
+      cnl_matched: !!gevonden,
+    };
+  };
+
+  // Bedrijfseigen termen als extra softskills
+  const eigenSoftskills = eigenTermenLijst.map(term => ({
+    softskill: term,
     cnl_code: null,
     niveau: 'Gevorderd',
     bron: 'bedrijf',
@@ -303,10 +336,10 @@ JSON (direct, geen markdown):
     ...resultaat,
     taken: (resultaat.taken ?? []).map(taak => ({
       ...taak,
-      vaardigheden: (taak.vaardigheden ?? []).map(s => enrichSkill(s, 'skill')),
-      competenties: [
-        ...(taak.competenties ?? []).map(s => enrichSkill(s, 'competentie')),
-        ...eigenSkills,
+      hardskills: (taak.hardskills ?? []).map(enrichHard),
+      softskills: [
+        ...(taak.softskills ?? []).map(enrichSoft),
+        ...eigenSoftskills,
       ],
     })),
   };
