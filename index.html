@@ -202,6 +202,8 @@ function App() {
   const [bedrijf, setBedrijf] = useState("");
   const [eigenTaal, setEigenTaal] = useState("");
   const [eigenOpen, setEigenOpen] = useState(false);
+  const [bronnen, setBronnen] = useState("");
+  const [bronnenOpen, setBronnenOpen] = useState(false);
   const [input, setInput] = useState("");
   const [stap, setStap] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -254,7 +256,7 @@ function App() {
     try {
       const res = await fetch('/api/analyse-competentnl', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ stap:1, functieprofiel:input, bedrijf, eigenTaal })
+        body: JSON.stringify({ stap:1, functieprofiel:input, bedrijf, eigenTaal, bronnen })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -273,7 +275,7 @@ function App() {
     try {
       const res = await fetch('/api/analyse-competentnl', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ stap:2, functietitel, taken:geselecteerdeTaken, functieprofiel:input, bedrijf, eigenTaal })
+        body: JSON.stringify({ stap:2, functietitel, taken:geselecteerdeTaken, functieprofiel:input, bedrijf, eigenTaal, bronnen })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -388,6 +390,22 @@ function App() {
               <label className="slabel" style={{color:"#6b21a8"}}>Bedrijfseigen termen & kernwaarden</label>
               <textarea rows={5} value={eigenTaal} onChange={e=>setEigenTaal(e.target.value)}
                 placeholder={"bijv. Veiligheid eerst,\nKlantpartnerschap,\nZero defects"} style={{minHeight:"auto",fontSize:11}}/>
+            </div>
+          </div>}
+        </div>
+
+        <div>
+          <button className={`toggle-btn ${bronnenOpen?"open":""}`} onClick={()=>setBronnenOpen(o=>!o)}
+            style={bronnenOpen?{borderColor:"#2d6a4f",color:"#1b4332",background:"#f0faf4"}:{}}>
+            <span>Bronnen werkgever</span>
+            <span>{bronnenOpen?"▲":"▼"}{bronnen.trim()&&<span style={{background:"#d8f3dc",color:"#1b4332",border:"1px solid #74c69d",padding:"1px 5px",borderRadius:2,fontSize:9,marginLeft:6}}>Actief</span>}</span>
+          </button>
+          {bronnenOpen&&<div style={{border:"1px solid #74c69d",borderTop:"none",padding:10,background:"#f0faf4",borderRadius:"0 0 2px 2px"}}>
+            <label className="slabel" style={{color:"#1b4332"}}>Website, jaarverslag of andere bronnen</label>
+            <textarea rows={6} value={bronnen} onChange={e=>setBronnen(e.target.value)}
+              placeholder={"Plak hier tekst van de website,\njaarverslag, CAO of andere\nbronnen van de werkgever..."} style={{minHeight:"auto",fontSize:11}}/>
+            <div style={{fontSize:9,color:"#2d6a4f",marginTop:6,lineHeight:1.7,background:"#d8f3dc",padding:"8px 10px",borderRadius:2}}>
+              Deze tekst wordt meegenomen bij het genereren van taken in stap 1 voor extra bedrijfscontext.
             </div>
           </div>}
         </div>
