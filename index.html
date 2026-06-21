@@ -193,7 +193,7 @@ async function generateWordDoc({ functietitel, bedrijf, samenvatting, vergelijkb
         h1("3. Skillset per taak"),
         p("Alle skills zijn afkomstig uit de CompetentNL-database, de Nederlandse nationale standaard voor het beschrijven van vaardigheden en competenties."),
         sp(120),
-        new Table({width:{size:9026,type:WidthType.DXA},columnWidths:[2800,800,1400,4026],rows:[mkHeader(["Skill (NL)","Type","Niveau","CNL Definitie"],[2800,800,1400,4026],ACCENT),...skillRows]}),
+        new Table({width:{size:9026,type:WidthType.DXA},columnWidths:[600,2800,700,2926,1500],rows:skillRows}),
         sp(280),
         h1("4. Bronnen"),
         new Table({width:{size:9026,type:WidthType.DXA},columnWidths:[2200,2400,4426],rows:[mkHeader(["Bron","URL","Omschrijving"],[2200,2400,4426],BRAND),...[["CompetentNL","https://competentnl.nl","Nederlandse nationale standaard voor het beschrijven van skills"],["ESCO (EU)","https://esco.ec.europa.eu","Europese classificatie van beroepen en vaardigheden"],["Anthropic Claude","https://www.anthropic.com","AI-model voor taakanalyse en skillskoppeling (claude-sonnet-4-6)"]].map(([naam,url,omschr])=>new TableRow({children:[new TableCell({borders,width:{size:2200,type:WidthType.DXA},margins:{top:70,bottom:70,left:140,right:100},children:[new Paragraph({children:[new TextRun({text:naam,font:"Arial",size:17,bold:true})]})]}),new TableCell({borders,width:{size:2400,type:WidthType.DXA},margins:{top:70,bottom:70,left:100,right:100},children:[new Paragraph({children:[new TextRun({text:url,font:"Arial",size:15,color:"1A56DB"})]})]}),new TableCell({borders,width:{size:4426,type:WidthType.DXA},margins:{top:70,bottom:70,left:100,right:80},children:[new Paragraph({children:[new TextRun({text:omschr,font:"Arial",size:15,color:"444444"})]})]})]}))]}),
@@ -351,7 +351,7 @@ function App() {
       [`Functie: ${functietitel}`,'','','','','','','',''],
       [`Datum: ${datumLang}`,'','','','','','','',''],
       ['','','','','','','','',''],
-      ['Type','Skill (NL)','Niveau','Gekoppelde taken','CompetentNL Code','CompetentNL URI','ESCO URI','Bron','Frequentie','Belang']
+      ['Type','Skill (NL)','Niveau','Gekoppelde taken','CompetentNL URI','Bron','Frequentie','Belang']
     ];
     const skillsPerTaak = new Map();
     if (skillsData) (skillsData.taken||[]).forEach(t => skillsPerTaak.set(t.id,t));
@@ -376,20 +376,20 @@ function App() {
       });
     });
     skillTaakMap.forEach(s => {
-      rows.push([s.type, s.naam, s.niveau, s.taken.join(' | '), s.cnl_code||'', s.cnl_uri||'', s.cnl_esco_uri||'', s.bron||'', s.freq||'', s.belang||'']);
+      rows.push([s.type, s.naam, s.niveau, s.taken.join(' | '), s.cnl_uri||'', s.bron||'', s.freq||'', s.belang||'']);
     });
     // Bedrijfseigen skills
     selHard.filter(s=>s.eigen).forEach(s => {
       const escNaam = getEigenSkillNaam(s.skill)||s.skill;
-      rows.push(['Hard', escNaam, getEigenSkillNiveau(s.skill), getEigenTaken(s.skill).join(' | '), '', '', '', 'bedrijf', '', '']);
+      rows.push(['Hard', escNaam, getEigenSkillNiveau(s.skill), getEigenTaken(s.skill).join(' | '), '', 'bedrijf', '', '']);
     });
     selSoft.filter(s=>s.eigen).forEach(s => {
       const term = s.softskill||s.skill;
       const escNaam = getEigenSkillNaam(term)||term;
-      rows.push(['Soft', escNaam, getEigenSkillNiveau(term), getEigenTaken(term).join(' | '), '', '', '', 'bedrijf', '', '']);
+      rows.push(['Soft', escNaam, getEigenSkillNiveau(term), getEigenTaken(term).join(' | '), '', 'bedrijf', '', '']);
     });
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [{wch:8},{wch:35},{wch:12},{wch:80},{wch:18},{wch:60},{wch:60},{wch:10},{wch:12},{wch:8}];
+    ws['!cols'] = [{wch:8},{wch:35},{wch:12},{wch:80},{wch:60},{wch:10},{wch:12},{wch:8}];
     XLSX.utils.book_append_sheet(wb, ws, 'Functieprofiel Skillset');
     const meta = [
       ['METHODIEK — Taakanalyse CompetentNL Skills',''],['Bright Work Solutions',''],['',''],
