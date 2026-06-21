@@ -108,8 +108,9 @@ function extractSkillsFromData(data) {
   const softskills = [];
   const softKeywords = ['communicer', 'samenwerk', 'overleg', 'leid', 'coach', 'motiveer',
     'empathie', 'flexibel', 'aanpass', 'initiatief', 'proactief', 'stress',
-    'plannen', 'organiseer', 'priorit', 'besliss', 'contact', 'relatie',
-    'presenteer', 'vergader', 'rapporteer', 'adviseer', 'onderhoud contact'];
+    'organiseer', 'priorit', 'besliss', 'contact onderhoud', 'relatiebeheer',
+    'presenteer', 'vergader', 'integriteit', 'zelfstandig werk', 'klantgerich',
+    'resultaatgerich', 'omgaan met', 'sociale vaardig'];
 
   for (const [uri, props] of Object.entries(data)) {
     const labels = props['prefLabel'] || [];
@@ -119,6 +120,8 @@ function extractSkillsFromData(data) {
     const notation = (props['notation'] || [])[0] || null;
     const types = props['type'] || [];
     const escoUri = [...(props['closeMatchESCO'] || []), ...(props['exactMatch'] || [])].find(u => u.includes('europa.eu')) || null;
+    // Definitie ophalen
+    const definitie = (props['definition'] || props['description'] || [])[0] || null;
 
     const isKennisgebied = types.some(t => t.includes('KnowledgeDomain') || t.includes('knowledge'));
     const isHumanCap = types.some(t => t.includes('HumanCapability'));
@@ -127,7 +130,7 @@ function extractSkillsFromData(data) {
 
     if (!isKennisgebied && !isHumanCap && !isESCOSkill && !isCNLSkill) continue;
 
-    const skill = { uri, label, notation, esco_uri: escoUri, cnl_matched: true };
+    const skill = { uri, label, notation, esco_uri: escoUri, definitie, cnl_matched: true };
 
     if (isKennisgebied) {
       hardskills.push({ ...skill, cnl_type: 'kennisgebied' });
@@ -198,6 +201,7 @@ async function vraagClaude(sys, prompt, apiKey, maxTokens = 16000) {
     body: JSON.stringify({
       model:      'claude-sonnet-4-6',
       max_tokens: maxTokens,
+      temperature: 0,
       system:     sys,
       messages:   [{ role: 'user', content: prompt }],
     }),
@@ -219,23 +223,26 @@ async function vraagClaude(sys, prompt, apiKey, maxTokens = 16000) {
 
 // ─── Stap 1: Taken genereren ─────────────────────────────────────────────────
 
-async function genereerTaken(functieprofiel, bedrijf, eigenTaal, bronnen, apiKey) {
+async function genereerTaken(functieprofiel, bedrijf, eigenTaal, bronnen, pdfTekst, apiKey) {
+  const bronnenTekst = Array.isArray(bronnen) ? bronnen.join('\n') : (bronnen||'');
   return vraagClaude(
     `Je bent expert in functie-analyse en skills-based werken. Geef ALLEEN geldige JSON terug, geen markdown.`,
     `Analyseer dit functieprofiel grondig. Haal ALLE taken op:
 1. Taken die expliciet in het profiel staan
 2. Taken die standaard bij dit beroep horen (sectorkennis)
 3. Taken die bij de context van het bedrijf horen
+${bronnenTekst ? '4. Taken die blijken uit de aanvullende bronnen' : ''}
 
 FUNCTIEPROFIEL: ${functieprofiel}
 ${bedrijf ? `BEDRIJF: ${bedrijf}` : ''}
 ${eigenTaal ? `BEDRIJFSEIGEN TERMEN: ${eigenTaal}` : ''}
-${bronnen ? `EXTRA CONTEXT WERKGEVER:\n${bronnen.slice(0, 2000)}` : ''}
+${bronnenTekst ? `AANVULLENDE BRONNEN (URLs):\n${bronnenTekst}` : ''}
+${pdfTekst ? `PDF INHOUD:\n${pdfTekst.slice(0, 3000)}` : ''}
 
 JSON (direct, geen markdown):
-{"functietitel":"string","samenvatting":"max 2 zinnen","vergelijkbare_titels":["string"],"taken":[{"id":"T01","taak":"concrete taakomschrijving","bron":"profiel|beroep|bedrijf","frequentie":"dagelijks|wekelijks|maandelijks","belang":"hoog|middel|laag","geselecteerd":true}]}
+{"functietitel":"string","samenvatting":"max 2 zinnen","vergelijkbare_titels":["string"],"taken":[{"id":"T01","taak":"concrete taakomschrijving","bron":"profiel|beroep|bedrijf|bron","frequentie":"dagelijks|wekelijks|maandelijks","belang":"hoog|middel|laag","geselecteerd":true}]}
 
-Genereer 15-30 taken. Wees volledig en concreet.`,
+Genereer 15-25 taken. Wees volledig en concreet.`,
     apiKey
   );
 }
@@ -373,11 +380,11 @@ JSON (direct, geen markdown):
 
   const enrichHard = (item) => {
     const gevonden = hardLookup.get(item.skill) || hardLookup.get(item.cnl_code);
-    return { ...item, cnl_label: item.skill, cnl_code: gevonden?.notation||item.cnl_code||null, cnl_uri: gevonden?.uri||null, cnl_esco_uri: gevonden?.esco_uri||null, cnl_type: gevonden?.cnl_type||'hardskill', cnl_matched: !!gevonden };
+    return { ...item, cnl_label: item.skill, cnl_code: gevonden?.notation||item.cnl_code||null, cnl_uri: gevonden?.uri||null, cnl_esco_uri: gevonden?.esco_uri||null, cnl_type: gevonden?.cnl_type||'hardskill', cnl_definitie: gevonden?.definitie||null, cnl_matched: !!gevonden };
   };
   const enrichSoft = (item) => {
     const gevonden = softLookup.get(item.softskill) || softLookup.get(item.cnl_code);
-    return { ...item, cnl_label: item.softskill, cnl_code: gevonden?.notation||item.cnl_code||null, cnl_uri: gevonden?.uri||null, cnl_esco_uri: gevonden?.esco_uri||null, cnl_type: gevonden?.cnl_type||'softskill', cnl_matched: !!gevonden };
+    return { ...item, cnl_label: item.softskill, cnl_code: gevonden?.notation||item.cnl_code||null, cnl_uri: gevonden?.uri||null, cnl_esco_uri: gevonden?.esco_uri||null, cnl_type: gevonden?.cnl_type||'softskill', cnl_definitie: gevonden?.definitie||null, cnl_matched: !!gevonden };
   };
 
   const eigenSoftskills = eigenTermenLijst.map(term => ({
@@ -411,10 +418,10 @@ export default async function handler(req, res) {
   if (!cnlKey) return res.status(500).json({ error: 'CNL_API_KEY niet ingesteld' });
 
   try {
-    const { stap, functieprofiel, functietitel, taken, bedrijf, eigenTaal, bronnen } = req.body ?? {};
+    const { stap, functieprofiel, functietitel, taken, bedrijf, eigenTaal, bronnen, pdfTekst } = req.body ?? {};
     if (stap === 1) {
       if (!functieprofiel) return res.status(400).json({ error: 'functieprofiel verplicht' });
-      return res.status(200).json(await genereerTaken(functieprofiel, bedrijf, eigenTaal, bronnen||'', anthropicKey));
+      return res.status(200).json(await genereerTaken(functieprofiel, bedrijf, eigenTaal, bronnen||[], pdfTekst||'', anthropicKey));
     }
     if (stap === 2) {
       if (!taken?.length) return res.status(400).json({ error: 'taken verplicht' });
