@@ -119,7 +119,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
 <script type="text/babel">
 const { useState } = React;
 
-async function generateWordDoc({ functietitel, bedrijf, samenvatting, vergelijkbareTitels, geselecteerdeTaken, skillsData, selHard, selSoft, overrides, eigenTermenLijst }) {
+async function generateWordDoc({ functietitel, bedrijf, samenvatting, vergelijkbareTitels, geselecteerdeTaken, skillsData, selHard, selSoft, overrides, eigenTermenLijst, uitgebreid, bronnen, pdfNaam, input }) {
   const {
     Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
     AlignmentType, HeadingLevel, BorderStyle, WidthType, ShadingType, LevelFormat, Footer, Header
@@ -128,6 +128,18 @@ async function generateWordDoc({ functietitel, bedrijf, samenvatting, vergelijkb
   const BRAND = "1B4332"; const ACCENT = "2D6A4F"; const LIGHT = "D8F3DC"; const MC = "A5D6A7";
   const border = {style:BorderStyle.SINGLE,size:1,color:MC};
   const borders = {top:border,bottom:border,left:border,right:border};
+
+  // Uitgebreide omschrijving ophalen indien aangevinkt
+  let uitgebreideOmschrijving = '';
+  if (uitgebreid) {
+    try {
+      const bronLijst = bronnen ? (Array.isArray(bronnen) ? bronnen.join(', ') : bronnen.split('\n').filter(b=>b.trim()).join(', ')) : '';
+      const res = await fetch('/api/analyse-competentnl', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ stap:3, functietitel, functieprofiel:input, samenvatting, taken:geselecteerdeTaken, skills:{hard:selHard,soft:selSoft}, bedrijf, bronnen:bronLijst }) });
+      const data = await res.json();
+      if (data.omschrijving) uitgebreideOmschrijving = data.omschrijving;
+    } catch(e) { console.error('Omschrijving fout:', e); }
+  }
   const h1 = (text) => new Paragraph({heading:HeadingLevel.HEADING_1,spacing:{before:360,after:160},border:{bottom:{style:BorderStyle.SINGLE,size:8,color:ACCENT,space:4}},children:[new TextRun({text,font:"Arial",size:28,bold:true,color:BRAND})]});
   const h2 = (text) => new Paragraph({heading:HeadingLevel.HEADING_2,spacing:{before:240,after:100},children:[new TextRun({text,font:"Arial",size:24,bold:true,color:ACCENT})]});
   const p = (text,opts={}) => new Paragraph({spacing:{before:60,after:100},children:[new TextRun({text,font:"Arial",size:20,...opts})]});
@@ -151,7 +163,7 @@ async function generateWordDoc({ functietitel, bedrijf, samenvatting, vergelijkb
         new TableCell({borders,width:{size:2800,type:WidthType.DXA},margins:{top:60,bottom:60,left:140,right:100},children:[new Paragraph({children:[new TextRun({text:s.naam,font:"Arial",size:17,bold:true})]})] }),
         new TableCell({borders,width:{size:800,type:WidthType.DXA},shading:{fill:s.type==='Hard'?"E8F5E9":"FEF9E7",type:ShadingType.CLEAR},margins:{top:60,bottom:60,left:80,right:80},children:[new Paragraph({children:[new TextRun({text:s.type,font:"Arial",size:16,color:s.type==='Hard'?"1B4332":"7D6608"})]})] }),
         new TableCell({borders,width:{size:1400,type:WidthType.DXA},margins:{top:60,bottom:60,left:80,right:80},children:[new Paragraph({children:[new TextRun({text:s.niveau,font:"Arial",size:17})]})] }),
-        new TableCell({borders,width:{size:4026,type:WidthType.DXA},margins:{top:60,bottom:60,left:100,right:80},children:[new Paragraph({children:[new TextRun({text:s.toelichting||'',font:"Arial",size:15,color:"444444"})]})] }),
+        new TableCell({borders,width:{size:4026,type:WidthType.DXA},margins:{top:60,bottom:60,left:100,right:80},children:[new Paragraph({children:[new TextRun({text:(s.cnl_definitie||s.toelichting||'').slice(0,300),font:"Arial",size:15,color:"444444"})]})] }),
       ]}));
     });
   });
@@ -167,12 +179,13 @@ async function generateWordDoc({ functietitel, bedrijf, samenvatting, vergelijkb
         new Paragraph({spacing:{before:0,after:40},children:[new TextRun({text:bedrijf||"",font:"Arial",size:24,color:"555555"})]}),
         new Paragraph({border:{bottom:{style:BorderStyle.SINGLE,size:12,color:ACCENT,space:8}},spacing:{before:80,after:280},children:[new TextRun({text:"Skills-based taakanalyse op basis van CompetentNL \u2014 Nederlandse Nationale Standaard",font:"Arial",size:18,color:"888888",italics:true})]}),
         new Table({width:{size:9026,type:WidthType.DXA},columnWidths:[2400,6626],rows:[
-          ...[["Bedrijf",bedrijf||"\u2014"],["Functietitel",functietitel],["Datum",datum],["Skills-taxonomie","CompetentNL v1 \u2014 Nationale standaard NL"],["Taken",String(geselecteerdeTaken.length)],["Hardskills",String(selHard.length)],["Softskills",String(selSoft.length)],...(vergelijkbareTitels.length?[["Ook bekend als",vergelijkbareTitels.join(", ")]]:[])].map(([k,v])=>new TableRow({children:[new TableCell({borders,width:{size:2400,type:WidthType.DXA},shading:{fill:LIGHT,type:ShadingType.CLEAR},margins:{top:80,bottom:80,left:140,right:100},children:[new Paragraph({children:[new TextRun({text:k,font:"Arial",size:18,bold:true,color:BRAND})]})]}),new TableCell({borders,width:{size:6626,type:WidthType.DXA},margins:{top:80,bottom:80,left:140,right:80},children:[new Paragraph({children:[new TextRun({text:v,font:"Arial",size:18})]})]})]}))]
+          ...[["Bedrijf",bedrijf||"\u2014"],["Functietitel",functietitel],["Datum",datum],["Skills-taxonomie","CompetentNL v1 \u2014 Nationale standaard NL"],["Taken",String(geselecteerdeTaken.length)],["Hardskills",String(alleHardskills.length)],["Softskills",String(alleSoftskills.length)],["Geselecteerde skills",String(selHard.length+selSoft.length)+" ("+String(selHard.length)+" hard, "+String(selSoft.length)+" soft)"],...(vergelijkbareTitels.length?[["Ook bekend als",vergelijkbareTitels.join(", ")]]:[])].map(([k,v])=>new TableRow({children:[new TableCell({borders,width:{size:2400,type:WidthType.DXA},shading:{fill:LIGHT,type:ShadingType.CLEAR},margins:{top:80,bottom:80,left:140,right:100},children:[new Paragraph({children:[new TextRun({text:k,font:"Arial",size:18,bold:true,color:BRAND})]})]}),new TableCell({borders,width:{size:6626,type:WidthType.DXA},margins:{top:80,bottom:80,left:140,right:80},children:[new Paragraph({children:[new TextRun({text:v,font:"Arial",size:18})]})]})]}))]
         }),
         sp(320),
         h1("1. Functieoverzicht"),
         p(samenvatting||""),
         ...(vergelijkbareTitels.length?[p(`Ook bekend als: ${vergelijkbareTitels.join(" \u00b7 ")}`,{color:"666666",italics:true})]:[]),
+        ...(uitgebreideOmschrijving ? uitgebreideOmschrijving.split('\n\n').filter(Boolean).map(a=>p(a)) : []),
         sp(160),
         h1("2. Geselecteerde taken"),
         new Table({width:{size:9026,type:WidthType.DXA},columnWidths:[400,4200,1700,1400,1326],rows:[mkHeader(["#","Taak","Frequentie","Belang","Bron"],[400,4200,1700,1400,1326],BRAND),...geselecteerdeTaken.map((t,i)=>new TableRow({children:[new TableCell({borders,width:{size:400,type:WidthType.DXA},margins:{top:70,bottom:70,left:100,right:60},children:[new Paragraph({children:[new TextRun({text:String(i+1),font:"Arial",size:16,color:"888888"})]})] }),new TableCell({borders,width:{size:4200,type:WidthType.DXA},margins:{top:70,bottom:70,left:120,right:100},children:[new Paragraph({children:[new TextRun({text:t.taak,font:"Arial",size:17})]})] }),new TableCell({borders,width:{size:1700,type:WidthType.DXA},margins:{top:70,bottom:70,left:100,right:80},children:[new Paragraph({children:[new TextRun({text:t.frequentie||"",font:"Arial",size:16})]})] }),new TableCell({borders,width:{size:1400,type:WidthType.DXA},margins:{top:70,bottom:70,left:100,right:80},children:[new Paragraph({children:[new TextRun({text:t.belang||"",font:"Arial",size:16})]})] }),new TableCell({borders,width:{size:1326,type:WidthType.DXA},margins:{top:70,bottom:70,left:100,right:80},children:[new Paragraph({children:[new TextRun({text:t.bron||"",font:"Arial",size:16})]})] })]}))]}),
@@ -180,7 +193,7 @@ async function generateWordDoc({ functietitel, bedrijf, samenvatting, vergelijkb
         h1("3. Skillset per taak"),
         p("Alle skills zijn afkomstig uit de CompetentNL-database, de Nederlandse nationale standaard voor het beschrijven van vaardigheden en competenties."),
         sp(120),
-        new Table({width:{size:9026,type:WidthType.DXA},columnWidths:[2800,800,1400,4026],rows:[mkHeader(["Skill (NL)","Type","Niveau","Toelichting"],[2800,800,1400,4026],ACCENT),...skillRows]}),
+        new Table({width:{size:9026,type:WidthType.DXA},columnWidths:[2800,800,1400,4026],rows:[mkHeader(["Skill (NL)","Type","Niveau","CNL Definitie"],[2800,800,1400,4026],ACCENT),...skillRows]}),
         sp(280),
         h1("4. Bronnen"),
         new Table({width:{size:9026,type:WidthType.DXA},columnWidths:[2200,2400,4426],rows:[mkHeader(["Bron","URL","Omschrijving"],[2200,2400,4426],BRAND),...[["CompetentNL","https://competentnl.nl","Nederlandse nationale standaard voor het beschrijven van skills"],["ESCO (EU)","https://esco.ec.europa.eu","Europese classificatie van beroepen en vaardigheden"],["Anthropic Claude","https://www.anthropic.com","AI-model voor taakanalyse en skillskoppeling (claude-sonnet-4-6)"]].map(([naam,url,omschr])=>new TableRow({children:[new TableCell({borders,width:{size:2200,type:WidthType.DXA},margins:{top:70,bottom:70,left:140,right:100},children:[new Paragraph({children:[new TextRun({text:naam,font:"Arial",size:17,bold:true})]})]}),new TableCell({borders,width:{size:2400,type:WidthType.DXA},margins:{top:70,bottom:70,left:100,right:100},children:[new Paragraph({children:[new TextRun({text:url,font:"Arial",size:15,color:"1A56DB"})]})]}),new TableCell({borders,width:{size:4426,type:WidthType.DXA},margins:{top:70,bottom:70,left:100,right:80},children:[new Paragraph({children:[new TextRun({text:omschr,font:"Arial",size:15,color:"444444"})]})]})]}))]}),
@@ -188,6 +201,21 @@ async function generateWordDoc({ functietitel, bedrijf, samenvatting, vergelijkb
         p(`Analyse gegenereerd op ${datum}.`,{italics:true,color:"888888"}),
       ]
     }]
+  });
+  // Bedrijfseigen skills toevoegen aan skillRows
+  eigenTermenLijst && eigenTermenLijst.filter(term => {
+    const key = `c-${term}`;
+    return selSoft.some(s => s.softskill === term && s.eigen);
+  }).forEach(term => {
+    const escNaam = (typeof getEigenSkillNaam === 'function' ? getEigenSkillNaam(term) : '') || term;
+    const niv = (typeof getEigenSkillNiveau === 'function' ? getEigenSkillNiveau(term) : '') || 'Gevorderd';
+    const taken = (typeof getEigenTaken === 'function' ? getEigenTaken(term) : []);
+    skillRows.push(new TableRow({children:[
+      new TableCell({borders,width:{size:2800,type:WidthType.DXA},margins:{top:60,bottom:60,left:140,right:100},children:[new Paragraph({children:[new TextRun({text:escNaam,font:"Arial",size:17,bold:true})]})] }),
+      new TableCell({borders,width:{size:800,type:WidthType.DXA},shading:{fill:"F3E8FF",type:ShadingType.CLEAR},margins:{top:60,bottom:60,left:80,right:80},children:[new Paragraph({children:[new TextRun({text:"Eigen",font:"Arial",size:16,color:"6B21A8"})]})] }),
+      new TableCell({borders,width:{size:1400,type:WidthType.DXA},margins:{top:60,bottom:60,left:80,right:80},children:[new Paragraph({children:[new TextRun({text:niv,font:"Arial",size:17})]})] }),
+      new TableCell({borders,width:{size:4026,type:WidthType.DXA},margins:{top:60,bottom:60,left:100,right:80},children:[new Paragraph({children:[new TextRun({text:`Bedrijfsterm: ${term}${taken.length?' | Taken: '+taken.join(', '):''}`,font:"Arial",size:15,color:"444444"})]})] }),
+    ]}));
   });
   return await Packer.toBlob(doc);
 }
@@ -204,6 +232,8 @@ function App() {
   const [eigenOpen, setEigenOpen] = useState(false);
   const [bronnen, setBronnen] = useState("");
   const [bronnenOpen, setBronnenOpen] = useState(false);
+  const [pdfTekst, setPdfTekst] = useState("");
+  const [pdfNaam, setPdfNaam] = useState("");
   const [input, setInput] = useState("");
   const [stap, setStap] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -220,6 +250,14 @@ function App() {
   const [openTask, setOpenTask] = useState(null);
   const [selectedDef, setSelectedDef] = useState({});
   const [wordLoading, setWordLoading] = useState(false);
+  const [eigenTaken, setEigenTaken] = useState({});
+  const setEigenTaak = (skill, idx, val) => setEigenTaken(p => ({...p, [skill]: Object.assign([...Array(5).fill('')], p[skill]||[], {[idx]: val})}));
+  const getEigenTaken = (skill) => (eigenTaken[skill]||[]).filter(t=>t&&t.trim());
+  const [eigenSkillNaam, setEigenSkillNaam] = useState({});
+  const [eigenSkillNiveau, setEigenSkillNiveau] = useState({});
+  const getEigenSkillNaam = (term) => eigenSkillNaam[term]||'';
+  const getEigenSkillNiveau = (term) => eigenSkillNiveau[term]||'Gevorderd';
+  const [uitgebreid, setUitgebreid] = useState(false);
 
   const heeftEigen = eigenTaal.trim().length > 0;
   const geselecteerdeTaken = taken.filter(t => t.geselecteerd);
@@ -250,13 +288,28 @@ function App() {
   const selHard = alleHardskills.filter(s=>selectedDef[`v-${s.skill}`]);
   const selSoft = alleSoftskills.filter(s=>selectedDef[`c-${s.softskill}`]);
 
+  const leesUitPdf = (file) => {
+    if (!file || !file.type.includes('pdf')) return;
+    setPdfNaam(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const arr = new Uint8Array(e.target.result);
+      let raw = '';
+      for (let i = 0; i < arr.length; i++) raw += String.fromCharCode(arr[i]);
+      const matches = raw.match(/[A-Za-zÀ-ɏ\s\d.,;:!?()%-]{30,}/g) || [];
+      const tekst = matches.join(' ').replace(/\s+/g, ' ').trim().slice(0, 8000);
+      setPdfTekst(tekst);
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
   const analyseerTaken = async () => {
     if (!input.trim()) return;
     setLoading(true); setLoadingMsg("Functieprofiel analyseren en taken genereren..."); setError(null);
     try {
       const res = await fetch('/api/analyse-competentnl', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ stap:1, functieprofiel:input, bedrijf, eigenTaal, bronnen })
+        body: JSON.stringify({ stap:1, functieprofiel:input, bedrijf, eigenTaal, bronnen: bronnen.trim() ? bronnen.split('\n').map(b=>b.trim()).filter(Boolean) : [], pdfTekst: pdfTekst||'' })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -293,77 +346,71 @@ function App() {
     const wb = XLSX.utils.book_new();
     const datum = new Date().toLocaleDateString('nl-NL');
     const datumLang = new Date().toLocaleDateString('nl-NL',{day:'numeric',month:'long',year:'numeric'});
-
     const rows = [
       [`Bedrijf: ${bedrijf||'-'}`,'','','','','','','',''],
       [`Functie: ${functietitel}`,'','','','','','','',''],
       [`Datum: ${datumLang}`,'','','','','','','',''],
       ['','','','','','','','',''],
-      ['Nr','Taak','Type','Skill (NL)','CompetentNL Code','CompetentNL URI','ESCO URI','Niveau','Bron']
+      ['Type','Skill (NL)','Niveau','Gekoppelde taken','CompetentNL Code','CompetentNL URI','ESCO URI','Bron','Frequentie','Belang']
     ];
-
     const skillsPerTaak = new Map();
     if (skillsData) (skillsData.taken||[]).forEach(t => skillsPerTaak.set(t.id,t));
     const selHardNames = new Set(selHard.map(s=>s.skill));
     const selSoftNames = new Set(selSoft.map(s=>s.softskill));
-
+    const skillTaakMap = new Map();
     geselecteerdeTaken.forEach(taak => {
       const st = skillsPerTaak.get(taak.id);
-      const vs = st ? (st.hardskills||[]).filter(s=>selHardNames.has(s.skill)) : [];
-      const cs = st ? (st.softskills||[]).filter(s=>selSoftNames.has(s.softskill)) : [];
-      const all = [
-        ...vs.map(s=>({...s,type:'Hardskill',naam:s.cnl_label||s.skill,niveau:getNiveau(taak.id,s.skill,s.niveau)})),
-        ...cs.map(s=>({...s,type:'Softskill',naam:s.cnl_label||s.softskill,niveau:getNiveau(taak.id,`c-${s.softskill}`,s.niveau||'Gevorderd')}))
-      ];
-      if (!all.length) return;
-      all.forEach((s,i) => rows.push([
-        i===0?taak.id:'', i===0?taak.taak:'',
-        s.type, s.naam,
-        s.cnl_code||'',
-        s.cnl_uri||'',
-        s.cnl_esco_uri||'',
-        s.niveau,
-        i===0?taak.bron:''
-      ]));
+      const hs = st ? (st.hardskills||[]).filter(s=>selHardNames.has(s.skill)) : [];
+      const ss = st ? (st.softskills||[]).filter(s=>selSoftNames.has(s.softskill)) : [];
+      hs.forEach(s => {
+        const key = 'h-' + s.skill;
+        if (!skillTaakMap.has(key)) skillTaakMap.set(key, { ...s, type:'Hard', naam:s.cnl_label||s.skill, taken:[], bron:taak.bron||'', freq:taak.frequentie||'', belang:taak.belang||'' });
+        skillTaakMap.get(key).taken.push(taak.taak);
+        skillTaakMap.get(key).niveau = getNiveau(taak.id, s.skill, s.niveau);
+      });
+      ss.forEach(s => {
+        const key = 's-' + s.softskill;
+        if (!skillTaakMap.has(key)) skillTaakMap.set(key, { ...s, type:'Soft', naam:s.cnl_label||s.softskill, taken:[], bron:taak.bron||'', freq:taak.frequentie||'', belang:taak.belang||'' });
+        skillTaakMap.get(key).taken.push(taak.taak);
+        skillTaakMap.get(key).niveau = getNiveau(taak.id, `c-${s.softskill}`, s.niveau||'Gevorderd');
+      });
     });
-
+    skillTaakMap.forEach(s => {
+      rows.push([s.type, s.naam, s.niveau, s.taken.join(' | '), s.cnl_code||'', s.cnl_uri||'', s.cnl_esco_uri||'', s.bron||'', s.freq||'', s.belang||'']);
+    });
+    // Bedrijfseigen skills
+    selHard.filter(s=>s.eigen).forEach(s => {
+      const escNaam = getEigenSkillNaam(s.skill)||s.skill;
+      rows.push(['Hard', escNaam, getEigenSkillNiveau(s.skill), getEigenTaken(s.skill).join(' | '), '', '', '', 'bedrijf', '', '']);
+    });
+    selSoft.filter(s=>s.eigen).forEach(s => {
+      const term = s.softskill||s.skill;
+      const escNaam = getEigenSkillNaam(term)||term;
+      rows.push(['Soft', escNaam, getEigenSkillNiveau(term), getEigenTaken(term).join(' | '), '', '', '', 'bedrijf', '', '']);
+    });
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [{wch:4},{wch:45},{wch:12},{wch:40},{wch:18},{wch:60},{wch:60},{wch:12},{wch:10}];
+    ws['!cols'] = [{wch:8},{wch:35},{wch:12},{wch:80},{wch:18},{wch:60},{wch:60},{wch:10},{wch:12},{wch:8}];
     XLSX.utils.book_append_sheet(wb, ws, 'Functieprofiel Skillset');
-
-    // Methodiek tabblad
     const meta = [
-      ['METHODIEK — Taakanalyse CompetentNL Skills',''],
-      ['Bright Work Solutions',''],
-      ['',''],
+      ['METHODIEK — Taakanalyse CompetentNL Skills',''],['Bright Work Solutions',''],['',''],
       [`Analyse aangemaakt op: ${datumLang}`,''],
       [`Functietitel: ${functietitel}`,''],
-      [`Bedrijf: ${bedrijf||'-'}`,''],
-      ['',''],
+      [`Bedrijf: ${bedrijf||'-'}`,''],['',''],
       ['ONDERDEEL','TOELICHTING'],
       ['Taken — hoe bepaald?','Claude analyseert het functieprofiel en combineert drie bronnen: (1) taken expliciet vermeld in het ingevoerde profiel, (2) standaardtaken die bij het beroep horen op basis van trainingsdata, (3) taken passend bij de bedrijfscontext indien opgegeven.'],
-      ['Skills — databron','Alle hardskills en softskills komen uit de CompetentNL-database, de Nederlandse nationale standaard voor het beschrijven van skills. Zie: https://competentnl.nl'],
-      ['CompetentNL Code','De CompetentNL-notatie is de unieke identifier van elke hardskill in de CompetentNL-database (bijv. 100.005.001.003).'],
-      ['CompetentNL URI','De Linked Data URI waarmee de skill direct opvraagbaar is in de CompetentNL-database.'],
-      ['ESCO URI','Waar beschikbaar is een koppeling gelegd met de overeenkomstige ESCO-skill (Europese Commissie).'],
-      ['Niveaus (Basis / Gevorderd / Expert)','Claude schat het vereiste niveau per skill per taak in. Basis = uitvoerend, onder begeleiding; Gevorderd = zelfstandig; Expert = strategisch, begeleidt anderen.'],
-      ['Bedrijfseigen termen','Termen die de gebruiker zelf invoert als bedrijfsspecifieke softskills. Niet gematcht op CompetentNL.'],
-      ['',''],
-      ['BRONVERMELDING',''],
+      ['Skills — databron','Alle skills komen uit de CompetentNL-database, de Nederlandse nationale standaard voor het beschrijven van skills. Zie: https://competentnl.nl'],
+      ['Niveaus','Basis = uitvoerend, onder begeleiding; Gevorderd = zelfstandig; Expert = strategisch, begeleidt anderen.'],
+      ['',''],['BRONVERMELDING',''],
       ['CompetentNL','https://competentnl.nl'],
       ['ESCO (Europese Commissie)','https://esco.ec.europa.eu'],
-      ['O*NET Online (referentie)','https://www.onetonline.org'],
       ['Anthropic Claude (AI-model)','https://www.anthropic.com'],
-      ['',''],
       [`Bronnen geraadpleegd op: ${datumLang}`,''],
     ];
     const wsMeta = XLSX.utils.aoa_to_sheet(meta);
     wsMeta['!cols'] = [{wch:35},{wch:90}];
     XLSX.utils.book_append_sheet(wb, wsMeta, 'Methodiek');
-
     XLSX.writeFile(wb, `Skillset_CompetentNL_${bedrijf?bedrijf.replace(/\s/g,'_')+'_':''}${functietitel.replace(/\s/g,'_')}_${datum.replace(/\//g,'-')}.xlsx`);
   };
-
   const D = NIVEAU;
 
   return <>
@@ -396,16 +443,32 @@ function App() {
 
         <div>
           <button className={`toggle-btn ${bronnenOpen?"open":""}`} onClick={()=>setBronnenOpen(o=>!o)}
-            style={bronnenOpen?{borderColor:"#2d6a4f",color:"#1b4332",background:"#f0faf4"}:{}}>
-            <span>Bronnen werkgever</span>
-            <span>{bronnenOpen?"▲":"▼"}{bronnen.trim()&&<span style={{background:"#d8f3dc",color:"#1b4332",border:"1px solid #74c69d",padding:"1px 5px",borderRadius:2,fontSize:9,marginLeft:6}}>Actief</span>}</span>
+            style={bronnenOpen?{borderColor:"#0ea5e9",color:"#0369a1",background:"#f0f9ff",borderRadius:"2px 2px 0 0"}:{}}>
+            <span>Aanvullende bronnen</span>
+            <span>{bronnenOpen?"▲":"▼"}{bronnen.trim()&&<span style={{background:"#e0f2fe",color:"#0369a1",border:"1px solid #7dd3fc",padding:"1px 5px",borderRadius:2,fontSize:9,marginLeft:6}}>Actief</span>}</span>
           </button>
-          {bronnenOpen&&<div style={{border:"1px solid #74c69d",borderTop:"none",padding:10,background:"#f0faf4",borderRadius:"0 0 2px 2px"}}>
-            <label className="slabel" style={{color:"#1b4332"}}>Website, jaarverslag of andere bronnen</label>
-            <textarea rows={6} value={bronnen} onChange={e=>setBronnen(e.target.value)}
-              placeholder={"Plak hier tekst van de website,\njaarverslag, CAO of andere\nbronnen van de werkgever..."} style={{minHeight:"auto",fontSize:11}}/>
-            <div style={{fontSize:9,color:"#2d6a4f",marginTop:6,lineHeight:1.7,background:"#d8f3dc",padding:"8px 10px",borderRadius:2}}>
-              Deze tekst wordt meegenomen bij het genereren van taken in stap 1 voor extra bedrijfscontext.
+          {bronnenOpen&&<div style={{border:"1px solid #0ea5e9",borderTop:"none",padding:10,background:"#f0f9ff",display:"flex",flexDirection:"column",gap:8,borderRadius:"0 0 2px 2px"}}>
+            <div>
+              <label className="slabel" style={{color:"#0369a1"}}>URLs van bronnen — één per regel, beginnen met https://</label>
+              <textarea rows={5} value={bronnen} onChange={e=>setBronnen(e.target.value)}
+                placeholder={"https://www.bedrijf.nl/over-ons\nhttps://www.bedrijf.nl/jaarverslag.pdf\nhttps://www.kadaster.nl/..."} style={{minHeight:"auto",fontSize:11}}/>
+              <div style={{fontSize:9,color:"#0369a1",marginTop:6,lineHeight:1.7,background:"#e0f2fe",padding:"8px 10px",borderRadius:2}}>
+Vul één URL per regel in, altijd beginnend met https://. Max 5 bronnen.
+              </div>
+            </div>
+            <div>
+              <label className="slabel" style={{color:"#0369a1"}}>Of upload een PDF (jaarverslag, rapport)</label>
+              <label style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",border:"1px dashed #7dd3fc",borderRadius:2,cursor:"pointer",background:"white",fontSize:10,color:"#0369a1"}}>
+                <span>📄</span>
+                <span>{pdfNaam || "Klik om een PDF te selecteren"}</span>
+                <input type="file" accept=".pdf" style={{display:"none"}} onChange={e=>leesUitPdf(e.target.files[0])}/>
+              </label>
+              {pdfTekst&&<div style={{fontSize:9,color:"#2d6a4f",marginTop:4,padding:"4px 8px",background:"#f0faf2",borderRadius:2}}>
+                ✓ PDF gelezen — {pdfTekst.length} tekens gevonden
+              </div>}
+              {pdfNaam&&!pdfTekst&&<div style={{fontSize:9,color:"#9b2226",marginTop:4}}>
+                ⚠ Geen tekst gevonden in PDF
+              </div>}
             </div>
           </div>}
         </div>
@@ -430,7 +493,7 @@ function App() {
           {stap>=2&&<button className="btn-main" onClick={()=>setStap(3)} style={{background:"#1b4332"}}>
             Stap 3: Definitieve skillset →
           </button>}
-          <button className="btn-ghost" onClick={()=>{setStap(0);setTaken([]);setSkillsData(null);setOverrides({});setSelectedDef({});}}>
+          <button className="btn-ghost" onClick={()=>{setStap(0);setTaken([]);setSkillsData(null);setOverrides({});setSelectedDef({});setEigenTaken({});setEigenSkillNaam({});setEigenSkillNiveau({});setPdfTekst('');setPdfNaam('');}}>
             ↺ Opnieuw beginnen
           </button>
         </>}
@@ -467,7 +530,7 @@ function App() {
           <div className="empty-t">Plak een functieprofiel om te beginnen</div>
           <div style={{fontSize:10,color:"var(--muted)",textAlign:"center",maxWidth:320,lineHeight:1.6,marginTop:8}}>
             Stap 1 → Taken genereren & valideren<br/>
-            Stap 2 → CompetentNL hardskills koppelen<br/>
+            Stap 2 → Skills koppelen<br/>
             Stap 3 → Definitieve skillset exporteren<br/>
             <span style={{fontSize:9,marginTop:6,display:"block",color:"var(--accent)"}}>Gebaseerd op de Nederlandse nationale skillsstandaard</span>
           </div>
@@ -590,6 +653,41 @@ function App() {
                 </div>}
               </div>;
             })}
+            {eigenTermenLijst.length>0&&<div style={{marginTop:16,border:"1px solid #c084fc",borderRadius:2,overflow:"hidden"}}>
+              <div style={{background:"#f3e8ff",padding:"8px 12px",fontSize:8,letterSpacing:".15em",textTransform:"uppercase",color:"#6b21a8",borderBottom:"1px solid #c084fc"}}>
+                Bedrijfseigen skills — koppel CompetentNL skill + taken
+              </div>
+              <div style={{padding:"10px 12px",display:"flex",flexDirection:"column",gap:10}}>
+                {eigenTermenLijst.map(term=>{
+                  const niv = getEigenSkillNiveau(term);
+                  const d = D[niv];
+                  const val = NIVEAUS.indexOf(niv);
+                  return <div key={term} style={{border:"1px solid #c084fc",borderRadius:2,padding:"10px 12px",background:"#fdf9ff"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
+                      <span style={{width:6,height:6,borderRadius:"50%",background:"#c084fc",flexShrink:0}}/>
+                      <div style={{flex:1}}>
+                        <span style={{fontSize:11,fontWeight:500}}>{term}</span>
+                        <span className="eigen-badge" style={{marginLeft:4}}>Bedrijfsterm</span>
+                      </div>
+                    </div>
+                    <div style={{fontSize:8,letterSpacing:".12em",textTransform:"uppercase",color:"#6b21a8",marginBottom:3}}>CompetentNL skill naam</div>
+                    <input className="field" value={getEigenSkillNaam(term)} onChange={e=>setEigenSkillNaam(p=>({...p,[term]:e.target.value}))} placeholder="bijv. contactdozen bedraden..." style={{marginBottom:8,fontSize:10,background:"white",borderColor:"#c084fc"}}/>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+                      <div style={{fontSize:8,letterSpacing:".12em",textTransform:"uppercase",color:"#6b21a8"}}>Niveau</div>
+                      <span className="sk-badge" style={{background:d.k,color:d.t,borderColor:d.b,fontSize:9}}>{niv}</span>
+                    </div>
+                    <div className="sl-wrap" style={{marginBottom:8}}>
+                      <input type="range" min={0} max={2} step={1} value={val}
+                        style={{background:`linear-gradient(to right,#c084fc 0%,#c084fc ${val*50}%,var(--border) ${val*50}%,var(--border) 100%)`}}
+                        onChange={e=>setEigenSkillNiveau(p=>({...p,[term]:NIVEAUS[parseInt(e.target.value)]}))}/>
+                      <div className="sl-labels"><span>Basis</span><span>Gevorderd</span><span>Expert</span></div>
+                    </div>
+                    <div style={{fontSize:8,letterSpacing:".12em",textTransform:"uppercase",color:"#6b21a8",marginBottom:4}}>Gekoppelde taken (max 5)</div>
+                    {[0,1,2,3,4].map(idx=><input key={idx} className="field" value={(eigenTaken[term]||[])[idx]||''} onChange={e=>setEigenTaak(term,idx,e.target.value)} placeholder={`Taak ${idx+1}...`} style={{marginBottom:3,fontSize:10,background:"white",borderColor:"#c084fc"}}/>)}
+                  </div>;
+                })}
+              </div>
+            </div>}
           </div>
         </div>}
 
@@ -614,10 +712,16 @@ function App() {
               <div className="counter" style={{fontWeight:600}}>Totaal: <strong>{selHard.length+selSoft.length}</strong></div>
               {(selHard.length+selSoft.length)>0&&<div className="export-btns">
                 <button onClick={exportExcel} className="btn-export btn-excel">↓ Excel</button>
-                {wordLoading
-                  ? <span style={{fontSize:10,color:"var(--accent)",padding:"5px 10px",border:"1px solid var(--border)",borderRadius:2}}>Word genereren...</span>
-                  : <button onClick={async()=>{setWordLoading(true);try{const blob=await generateWordDoc({functietitel,bedrijf,samenvatting,vergelijkbareTitels,geselecteerdeTaken,skillsData,selHard,selSoft,overrides,eigenTermenLijst});const datum=new Date().toLocaleDateString('nl-NL').replace(/\//g,'-');const naam=`Taakanalyse_CNL_${bedrijf?bedrijf.replace(/\s/g,'_')+'_':''}${functietitel.replace(/\s/g,'_')}_${datum}.docx`;const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=naam;a.click();URL.revokeObjectURL(url);}catch(e){alert('Word fout: '+e.message);}finally{setWordLoading(false);}}} className="btn-export btn-word">↓ Word</button>
-                }
+                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+                  {wordLoading
+                    ? <span style={{fontSize:10,color:"var(--accent)",padding:"5px 10px",border:"1px solid var(--border)",borderRadius:2}}>Word genereren...</span>
+                    : <button onClick={async()=>{setWordLoading(true);try{const blob=await generateWordDoc({functietitel,bedrijf,samenvatting,vergelijkbareTitels,geselecteerdeTaken,skillsData,selHard,selSoft,overrides,eigenTermenLijst,uitgebreid,bronnen,pdfNaam,input});const datum=new Date().toLocaleDateString('nl-NL').replace(/\//g,'-');const naam=`Taakanalyse_CNL_${bedrijf?bedrijf.replace(/\s/g,'_')+'_':''}${functietitel.replace(/\s/g,'_')}_${datum}.docx`;const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=naam;a.click();URL.revokeObjectURL(url);}catch(e){alert('Word fout: '+e.message);}finally{setWordLoading(false);}}} className="btn-export btn-word">↓ Word</button>
+                  }
+                  <label style={{display:"flex",alignItems:"center",gap:5,fontSize:9,color:"var(--accent2)",cursor:"pointer"}}>
+                    <input type="checkbox" checked={uitgebreid} onChange={e=>setUitgebreid(e.target.checked)} style={{cursor:"pointer"}}/>
+                    Uitgebreide functieomschrijving
+                  </label>
+                </div>
               </div>}
             </div>
             <div style={{marginBottom:16}}>
