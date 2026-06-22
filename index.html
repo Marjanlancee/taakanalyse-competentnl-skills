@@ -147,25 +147,38 @@ async function generateWordDoc({ functietitel, bedrijf, samenvatting, vergelijkb
 
   const mkHeader = (cells,widths,fill) => new TableRow({tableHeader:true,children:cells.map((c,i)=>new TableCell({borders,width:{size:widths[i],type:WidthType.DXA},shading:{fill,type:ShadingType.CLEAR},margins:{top:80,bottom:80,left:140,right:100},children:[new Paragraph({children:[new TextRun({text:c,font:"Arial",size:17,bold:true,color:"FFFFFF"})]})]}))});
 
-  const skillRows = [];
+  // Skill-centric: één rij per skill, alle gekoppelde taken erin — zelfde als Lightcast
+  const skillMap = new Map();
   geselecteerdeTaken.forEach(taak => {
     const st = skillsPerTaak.get(taak.id);
     const hs = st?(st.hardskills||[]).filter(s=>selHardNames.has(s.skill)):[];
     const ss = st?(st.softskills||[]).filter(s=>selSoftNames.has(s.softskill)):[];
-    if(!hs.length&&!ss.length) return;
-    skillRows.push(new TableRow({children:[new TableCell({borders,columnSpan:4,width:{size:9026,type:WidthType.DXA},shading:{fill:LIGHT,type:ShadingType.CLEAR},margins:{top:80,bottom:80,left:140,right:140},children:[new Paragraph({children:[new TextRun({text:taak.id+'. '+taak.taak,font:"Arial",size:18,bold:true,color:BRAND})]})]})]}) );
-    const alleSkills = [
-      ...hs.map(s=>({...s,type:'Hard',naam:s.cnl_label||s.skill,niveau:getNiveau(taak.id,s.skill,s.niveau),definitie:s.cnl_definitie||''})),
-      ...ss.map(s=>({...s,type:'Soft',naam:s.cnl_label||s.softskill,niveau:getNiveau(taak.id,'c-'+s.softskill,s.niveau||'Gevorderd'),definitie:s.cnl_definitie||''}))
-    ];
-    alleSkills.forEach(s => {
-      skillRows.push(new TableRow({children:[
-        new TableCell({borders,width:{size:2800,type:WidthType.DXA},margins:{top:60,bottom:60,left:140,right:100},children:[new Paragraph({children:[new TextRun({text:s.naam,font:"Arial",size:17,bold:true})]})] }),
-        new TableCell({borders,width:{size:800,type:WidthType.DXA},shading:{fill:s.type==='Hard'?"E8F5E9":"FEF9E7",type:ShadingType.CLEAR},margins:{top:60,bottom:60,left:80,right:80},children:[new Paragraph({children:[new TextRun({text:s.type,font:"Arial",size:16,color:s.type==='Hard'?"1B4332":"7D6608"})]})] }),
-        new TableCell({borders,width:{size:1400,type:WidthType.DXA},margins:{top:60,bottom:60,left:80,right:80},children:[new Paragraph({children:[new TextRun({text:s.niveau,font:"Arial",size:17})]})] }),
-        new TableCell({borders,width:{size:4026,type:WidthType.DXA},margins:{top:60,bottom:60,left:100,right:80},children:[new Paragraph({children:[new TextRun({text:s.definitie.slice(0,300),font:"Arial",size:15,color:"444444"})]})] }),
-      ]}));
+    hs.forEach(s => {
+      const key = 'h-'+s.skill;
+      const niveau = getNiveau(taak.id, s.skill, s.niveau);
+      if (!skillMap.has(key)) skillMap.set(key, {type:'Hard', naam:s.cnl_label||s.skill, niveau, definitie:s.cnl_definitie||'', taken:[]});
+      skillMap.get(key).taken.push(taak.taak);
     });
+    ss.forEach(s => {
+      const key = 'c-'+s.softskill;
+      const niveau = getNiveau(taak.id, 'c-'+s.softskill, s.niveau||'Gevorderd');
+      if (!skillMap.has(key)) skillMap.set(key, {type:'Soft', naam:s.cnl_label||s.softskill, niveau, definitie:s.cnl_definitie||'', taken:[]});
+      skillMap.get(key).taken.push(taak.taak);
+    });
+  });
+
+  // Kolombreedte: Type(600) | Skill NL(2500) | Niveau(1200) | Gekoppelde taken(3226) | CNL Definitie(1500) = 9026
+  const COL = [600,2500,1200,3226,1500];
+  const skillRows = [...skillMap.values()].map(s => {
+    const takenTekst = s.taken.map((t,i)=>(i+1)+'. '+t).join('\n');
+    const takenParagraphs = s.taken.map((t,i) => new Paragraph({spacing:{before:40,after:40},children:[new TextRun({text:(i+1)+'. '+t,font:"Arial",size:15})]}));
+    return new TableRow({children:[
+      new TableCell({borders,width:{size:COL[0],type:WidthType.DXA},shading:{fill:s.type==='Hard'?"E8F5E9":"FEF9E7",type:ShadingType.CLEAR},margins:{top:60,bottom:60,left:80,right:80},children:[new Paragraph({children:[new TextRun({text:s.type,font:"Arial",size:16,bold:true,color:s.type==='Hard'?"1B4332":"7D6608"})]})] }),
+      new TableCell({borders,width:{size:COL[1],type:WidthType.DXA},margins:{top:60,bottom:60,left:140,right:100},children:[new Paragraph({children:[new TextRun({text:s.naam,font:"Arial",size:17,bold:true})]})] }),
+      new TableCell({borders,width:{size:COL[2],type:WidthType.DXA},margins:{top:60,bottom:60,left:80,right:80},children:[new Paragraph({children:[new TextRun({text:s.niveau,font:"Arial",size:16})]})] }),
+      new TableCell({borders,width:{size:COL[3],type:WidthType.DXA},margins:{top:60,bottom:60,left:100,right:80},children:takenParagraphs }),
+      new TableCell({borders,width:{size:COL[4],type:WidthType.DXA},margins:{top:60,bottom:60,left:100,right:80},children:[new Paragraph({children:[new TextRun({text:s.definitie.slice(0,300),font:"Arial",size:15,color:"444444"})]})] }),
+    ]});
   });
 
   const doc = new Document({
@@ -206,9 +219,9 @@ async function generateWordDoc({ functietitel, bedrijf, samenvatting, vergelijkb
         sp(120),
         new Table({
           width:{size:9026,type:WidthType.DXA},
-          columnWidths:[2800,800,1400,4026],
+          columnWidths:COL,
           rows:[
-            mkHeader(["Skill (NL)","Type","Niveau","CNL Definitie"],[2800,800,1400,4026],BRAND),
+            mkHeader(["Type","Skill (NL)","Niveau","Gekoppelde taken","CNL Definitie"],COL,BRAND),
             ...skillRows
           ]
         }),
