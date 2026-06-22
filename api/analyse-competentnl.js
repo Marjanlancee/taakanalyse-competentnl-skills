@@ -34,6 +34,25 @@ function groupBySubject(triples) {
   return map;
 }
 
+function extractDefinitie(props) {
+  // Probeer alle mogelijke predicate-namen voor definitie
+  const kandidaten = [
+    'hasDefinition',
+    'definition',
+    'description',
+    'scopeNote',
+    'comment',
+    'abstract',
+    'note',
+    'altLabel',
+  ];
+  for (const k of kandidaten) {
+    const val = (props[k] || []).find(v => v && v.length > 10 && !v.startsWith('http'));
+    if (val) return val;
+  }
+  return null;
+}
+
 async function cnlGet(endpoint, cnlKey) {
   const url = CNL_BASE + endpoint;
   console.log('CNL GET:', url);
@@ -48,7 +67,13 @@ async function cnlGet(endpoint, cnlKey) {
   const text = await res.text();
   console.log('CNL response length: ' + text.length);
   if (!text || text.trim().length < 10) return {};
-  return groupBySubject(parseNTriples(text));
+  const parsed = groupBySubject(parseNTriples(text));
+  // Debug: log alle unieke predicate-keys voor de eerste skill
+  const firstKey = Object.keys(parsed)[0];
+  if (firstKey) {
+    console.log('Predicate keys voor eerste entry:', Object.keys(parsed[firstKey]).join(', '));
+  }
+  return parsed;
 }
 
 async function zoekBeroepen(searchTerm, cnlKey) {
@@ -61,7 +86,7 @@ async function zoekBeroepen(searchTerm, cnlKey) {
     if (!uri.includes('/occupation/') && !uri.includes('/uwv/')) continue;
     const labels = props['prefLabel'] || props['literalForm'] || [];
     const label = labels[0];
-    const definitie = (props['definition'] || [])[0] || '';
+    const definitie = extractDefinitie(props) || '';
     if (label && !label.startsWith('http')) {
       beroepen.push({ uri, label, definitie });
     }
@@ -107,7 +132,7 @@ function extractSkillsFromData(data) {
     const notation = (props['notation'] || [])[0] || null;
     const types = props['type'] || [];
     const escoUri = [...(props['closeMatchESCO'] || []), ...(props['exactMatch'] || [])].find(u => u.includes('europa.eu')) || null;
-    const definitie = (props['definition'] || props['description'] || [])[0] || null;
+    const definitie = extractDefinitie(props);
     const isKennisgebied = types.some(t => t.includes('KnowledgeDomain') || t.includes('knowledge'));
     const isHumanCap = types.some(t => t.includes('HumanCapability'));
     const isESCOSkill = uri.includes('data.europa.eu/esco/skill');
@@ -218,6 +243,35 @@ async function genereerTaken(functieprofiel, bedrijf, eigenTaal, bronnen, pdfTek
   );
 }
 
+async function genereerDefinities(skills, apiKey) {
+  // Fallback: Claude genereert definities voor skills zonder CNL-definitie
+  const zonderDef = skills.filter(s => !s.definitie);
+  if (zonderDef.length === 0) return skills;
+
+  const lijst = zonderDef.map((s, i) => i + ': ' + s.label).join('\n');
+  try {
+    const result = await vraagClaude(
+      'Je bent expert in Nederlandse HR en competentiemanagement. Geef ALLEEN geldige JSON terug.',
+      'Geef voor elke skill een korte Nederlandse definitie (1-2 zinnen, max 150 tekens).\n\n'
+      + 'SKILLS:\n' + lijst + '\n\n'
+      + 'JSON: {"definities": ["definitie voor skill 0", "definitie voor skill 1", ...]}',
+      apiKey, 2000
+    );
+    const defs = result.definities || [];
+    let idx = 0;
+    return skills.map(s => {
+      if (!s.definitie) {
+        s.definitie = defs[idx] || '';
+        idx++;
+      }
+      return s;
+    });
+  } catch(e) {
+    console.log('Definitie generatie fout:', e.message);
+    return skills;
+  }
+}
+
 async function koppelSkills(functietitel, taken, functieprofiel, bedrijf, eigenTaal, anthropicKey, cnlKey) {
   let alleHardskills = [];
   let alleSoftskills = [];
@@ -324,7 +378,7 @@ async function koppelSkills(functietitel, taken, functieprofiel, bedrijf, eigenT
     cnl_esco_uri: null, cnl_type: 'eigen', cnl_matched: false, eigen: true,
   }));
 
-  return {
+  const verrijktResultaat = {
     ...resultaat,
     taken: (resultaat.taken ?? []).map(taak => ({
       ...taak,
@@ -332,6 +386,40 @@ async function koppelSkills(functietitel, taken, functieprofiel, bedrijf, eigenT
       softskills: [...(taak.softskills ?? []).map(enrichSoft), ...eigenSoftskills],
     })),
   };
+
+  // Verzamel unieke skills zonder definitie en genereer ze via Claude als fallback
+  const skillsZonderDef = [];
+  const skillDefMap = new Map();
+  verrijktResultaat.taken.forEach(taak => {
+    [...(taak.hardskills || []), ...(taak.softskills || [])].forEach(s => {
+      const naam = s.cnl_label || s.skill || s.softskill || '';
+      if (naam && !s.cnl_definitie && !skillDefMap.has(naam)) {
+        skillDefMap.set(naam, null);
+        skillsZonderDef.push({ label: naam });
+      }
+    });
+  });
+
+  if (skillsZonderDef.length > 0) {
+    console.log('Genereer definities voor ' + skillsZonderDef.length + ' skills via Claude...');
+    const metDef = await genereerDefinities(skillsZonderDef, anthropicKey);
+    metDef.forEach(s => skillDefMap.set(s.label, s.definitie || ''));
+
+    // Voeg definities toe aan resultaat
+    verrijktResultaat.taken = verrijktResultaat.taken.map(taak => ({
+      ...taak,
+      hardskills: (taak.hardskills || []).map(s => ({
+        ...s,
+        cnl_definitie: s.cnl_definitie || skillDefMap.get(s.cnl_label || s.skill) || ''
+      })),
+      softskills: (taak.softskills || []).map(s => ({
+        ...s,
+        cnl_definitie: s.cnl_definitie || skillDefMap.get(s.cnl_label || s.softskill) || ''
+      })),
+    }));
+  }
+
+  return verrijktResultaat;
 }
 
 export default async function handler(req, res) {
